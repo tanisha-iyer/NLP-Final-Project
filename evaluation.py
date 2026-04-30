@@ -7,9 +7,9 @@ from rouge_score import rouge_scorer
 from bert_score import score as bert_score_fn
 
 # ── Ground truth Q&A set ───────────────────────────────────────────────────────
-# 15 pairs: 5 factual, 5 opinion-summary, 2 adversarial, 3 mixed
+
 GROUND_TRUTH = [
-    # Factual questions
+    # Factual
     {
         "question": "Which subreddits are most active in climate change discussions?",
         "answer":   "The most active subreddits include r/climate, r/environment, r/climateskeptics, and r/worldnews.",
@@ -35,7 +35,7 @@ GROUND_TRUTH = [
         "answer":   "Common topics include global warming, policy, fossil fuels, renewable energy, and extreme weather.",
         "type":     "factual"
     },
-    # Opinion-summary questions
+    # Opinion
     {
         "question": "What do Reddit users think about government climate policy?",
         "answer":   "Users are generally critical of government inaction and call for stronger emissions regulations and international agreements.",
@@ -77,7 +77,7 @@ GROUND_TRUTH = [
         "answer":   "Carbon taxes are generally supported as a market-based solution, though some users argue they disproportionately affect lower-income groups.",
         "type":     "opinion"
     },
-
+    # adversial questions 
     {
         "question": "How does climate change impact marine biodiversity in the Pacific Ocean?",
         "answer":   "NOT_IN_CORPUS",
@@ -90,8 +90,7 @@ GROUND_TRUTH = [
     },
 ]
 
-
-# ── Scoring functions ──────────────────────────────────────────────────────────
+# scoring functions 
 
 def rouge_l(prediction: str, reference: str) -> float:
     if reference == "NOT_IN_CORPUS":
@@ -100,8 +99,7 @@ def rouge_l(prediction: str, reference: str) -> float:
     return round(scorer.score(reference, prediction)["rougeL"].fmeasure, 4)
 
 
-def bertscore(predictions: list[str], references: list[str]) -> list[float]:
-    """Batch BERTScore computation."""
+def bertscore(predictions: list, references: list) -> list:
     valid = [(p, r) for p, r in zip(predictions, references) if r != "NOT_IN_CORPUS"]
     if not valid:
         return []
@@ -111,50 +109,39 @@ def bertscore(predictions: list[str], references: list[str]) -> list[float]:
 
 
 def faithfulness_flag(answer: str, context: str) -> int:
-    """
-    Binary manual flag: 1 = faithful (answer only uses context info),
-    0 = hallucinated (answer contains info not in context).
-    This is meant to be filled in manually, but we auto-flag obvious refusals
-    for adversarial questions as faithful (model correctly said it doesn't know).
-    """
     refusal_phrases = [
+        "i cannot find sufficient information in the dataset",  # exact prompt phrase
         "not present", "not in the", "cannot find", "no information",
         "not available", "i don't", "i do not", "not mentioned"
     ]
-    answer_lower = answer.lower()
-    if any(p in answer_lower for p in refusal_phrases):
-        return 1   # correctly refused = faithful
-    return -1      # -1 = needs manual review
+    if any(p in answer.lower() for p in refusal_phrases):
+        return 1
+    return -1   # -1 = needs manual review
 
 
 def evaluate(results_df: pd.DataFrame) -> pd.DataFrame:
-    """
-    results_df columns: question, reference, prediction, model, type, context
-    Returns df with added rouge_l, bertscore, faithfulness columns.
-    """
     results_df = results_df.copy()
 
-    # ROUGE-L (per row)
+    # ROUGE-L per row
     results_df["rouge_l"] = results_df.apply(
         lambda r: rouge_l(r["prediction"], r["reference"]), axis=1
     )
 
-    # BERTScore (batch per model)
+    # BERTScore per model
     bert_scores = {}
     for model_name in results_df["model"].unique():
-        subset = results_df[results_df["model"] == model_name]
+        subset     = results_df[results_df["model"] == model_name]
         valid_mask = subset["reference"] != "NOT_IN_CORPUS"
-        preds = subset.loc[valid_mask, "prediction"].tolist()
-        refs  = subset.loc[valid_mask, "reference"].tolist()
+        preds      = subset.loc[valid_mask, "prediction"].tolist()
+        refs       = subset.loc[valid_mask, "reference"].tolist()
         if preds:
             scores = bertscore(preds, refs)
-            idx    = subset.loc[valid_mask].index
-            for i, s in zip(idx, scores):
+            for i, s in zip(subset.loc[valid_mask].index, scores):
                 bert_scores[i] = s
 
     results_df["bertscore"] = results_df.index.map(lambda i: bert_scores.get(i, None))
 
-    # Auto-faithfulness flag
+    # Faithfulness
     results_df["faithfulness"] = results_df.apply(
         lambda r: faithfulness_flag(r["prediction"], r["context"]), axis=1
     )

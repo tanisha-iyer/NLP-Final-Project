@@ -85,31 +85,16 @@ def call_groq(prompt: str, api_key: str, model: str = "llama3-8b-8192") -> str:
     return response.choices[0].message.content.strip()
 
 
-def call_gemini(prompt: str, api_key: str, model: str = "gemini-1.5-flash") -> str:
-    """Call Google Gemini API (free tier via AI Studio)."""
-    import google.generativeai as genai
-    genai.configure(api_key=api_key)
-    m        = genai.GenerativeModel(model)
-    response = m.generate_content(prompt)
-    return response.text.strip()
-
-
 #  Main RAG function 
 
 def rag_answer(query: str, llm: str, api_keys: dict, top_k: int = 8) -> dict:
-    """
-    Full RAG pipeline.
-    Returns dict with: answer, context_chunks, prompt
-    """
     chunks  = retrieve(query, top_k=top_k)
     context = format_context(chunks)
     prompt  = build_prompt(query, context)
 
     if llm == "Groq (LLaMA3)":
         answer = call_groq(prompt, api_keys["groq"])
-    elif llm == "Gemini":
-        answer = call_gemini(prompt, api_keys["gemini"])
     else:
-        answer = "Unknown LLM selected."
+        answer = "No LLM selected."
 
     return {"answer": answer, "chunks": chunks, "context": context, "prompt": prompt}

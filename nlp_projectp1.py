@@ -7,6 +7,9 @@ import plotly.graph_objects as go
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.decomposition import LatentDirichletAllocation
 from concurrent.futures import ThreadPoolExecutor
+import os
+from ragEngine import rag_answer, retrieve
+from evaluation import GROUND_TRUTH, evaluate, rouge_l, bertscore, faithfulness_flag
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
@@ -68,12 +71,12 @@ with st.spinner("Loading data..."):
     posts, comments = load_data()
     posts, comments = preprocess(posts, comments)
 
-# ── Sidebar ────────────────────────────────────────────────────────────────────
+# Create the Sidebar 
 
 st.sidebar.title("Filters")
 time_range = st.sidebar.selectbox("Select Time Range", ["Daily", "Weekly", "Monthly"])
 
-# ── KPI Metrics ────────────────────────────────────────────────────────────────
+# ─KPI Metrics 
 
 st.title("Reddit Climate Change Dashboard")
 
@@ -89,7 +92,7 @@ if avg_sentiment is not None:
 else:
     col5.metric("Avg Sentiment", "Not Available")
 
-# ── Time Series ────────────────────────────────────────────────────────────────
+# Time Stats 
 
 @st.cache_data
 def compute_time_series(posts, comments):
@@ -105,7 +108,7 @@ posts_data, comments_data = time_data[time_range]
 st.subheader(f"{time_range} Activity")
 st.line_chart(pd.DataFrame({"Posts": posts_data, "Comments": comments_data}))
 
-# ── Activity Patterns ──────────────────────────────────────────────────────────
+# Activity 
 
 @st.cache_data
 def compute_activity(comments):
@@ -172,7 +175,7 @@ def clean_text(text):
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
-# ── LDA Topic Modelling ────────────────────────────────────────────────────────
+# LDA Topic 
 
 @st.cache_resource
 def fit_lda(posts_df):
@@ -211,7 +214,7 @@ def build_topics(lda, feature_names, doc_topic):
         })
     return sorted(topics, key=lambda x: x["share"], reverse=True), dominant
 
-# ── Trending vs Persistent Detection ──────────────────────────────────────────
+#  Trending vs Persistent Topics  
 
 @st.cache_data
 def detect_trending(posts_df, _doc_topic, _sampled_idx, dominant, topics):
@@ -557,3 +560,145 @@ with tab4:
     )
     fig_tree.update_layout(margin=dict(l=0, r=0, t=40, b=0))
     st.plotly_chart(fig_tree, use_container_width=True)
+
+# RAG Section 
+
+st.header("RAG Question Answering")
+st.caption("Retrieval-Augmented Generation over Reddit climate change posts and comments.")
+
+# API keys — store in st.secrets or sidebar inputs
+st.sidebar.subheader("RAG API Keys")
+groq_key = st.secrets.get("GROQ_API_KEY", "") or st.sidebar.text_input(
+    "Groq API Key", type="password", key="groq_key"
+)
+api_keys = {"groq": groq_key}
+
+# ── Query Interface ────────────────────────────────────────────────────────────
+
+st.subheader("Ask a question")
+query   = st.text_input("Enter your question about Reddit climate discussions")
+llm     = st.selectbox("Choose LLM", ["Groq (LLaMA3)"])
+top_k   = st.slider("Number of sources to retrieve", 3, 15, 8)
+
+if st.button("Get Answer") and query:
+    if not (groq_key or gemini_key):
+        st.warning("Please enter an API key in the sidebar.")
+    else:
+        with st.spinner("Retrieving and generating..."):
+            result = rag_answer(query, llm, api_keys, top_k=top_k)
+
+        st.markdown("#### Answer")
+        st.markdown(
+            f'<div style="background:#f0f9ff;border-left:4px solid #378ADD;'
+            f'padding:12px 16px;border-radius:6px;font-size:14px;">'
+            f'{result["answer"]}</div>',
+            unsafe_allow_html=True
+        )
+
+        with st.expander("Retrieved sources"):
+            for i, c in enumerate(result["chunks"], 1):
+                st.markdown(
+                    f'<div style="background:#f8f9fa;border:1px solid #ddd;'
+                    f'border-radius:6px;padding:8px 12px;margin-bottom:6px;font-size:12px;">'
+                    f'<b>{i}. {c["type"].upper()}</b> · r/{c.get("subreddit","?")} · '
+                    f'similarity: {c["score_sim"]}<br>{c["text"]}</div>',
+                    unsafe_allow_html=True
+                )
+
+        with st.expander("Full prompt sent to LLM"):
+            st.code(result["prompt"], language="text")
+
+
+# ── Evaluation Section ─────────────────────────────────────────────────────────
+
+st.subheader("Model Evaluation")
+st.caption("Runs all 15 ground-truth questions through both LLMs and scores the answers.")
+
+if st.button("Run Full Evaluation (takes ~2 min)"):
+    if not (groq_key and gemini_key):
+        st.warning("Both API keys required for comparative evaluation.")
+    else:
+        rows = []
+        progress = st.progress(0)
+        total    = len(GROUND_TRUTH) * 2
+
+        for i, qa in enumerate(GROUND_TRUTH):
+            for model_name in ["Groq (LLaMA3)", "Gemini"]:
+                with st.spinner(f"Running {model_name} on Q{i+1}..."):
+                    try:
+                        result = rag_answer(qa["question"], model_name, api_keys)
+                        rows.append({
+                            "question":   qa["question"],
+                            "reference":  qa["answer"],
+                            "prediction": result["answer"],
+                            "context":    result["context"],
+                            "model":      model_name,
+                            "type":       qa["type"],
+                        })
+                    except Exception as e:
+                        rows.append({
+                            "question":   qa["question"],
+                            "reference":  qa["answer"],
+                            "prediction": f"ERROR: {e}",
+                            "context":    "",
+                            "model":      model_name,
+                            "type":       qa["type"],
+                        })
+                progress.progress((i * 2 + (0 if model_name == "Groq (LLaMA3)" else 1) + 1) / total)
+
+        results_df = pd.DataFrame(rows)
+        results_df = evaluate(results_df)
+
+        # ── Summary table ──────────────────────────────────────────────────────
+        st.markdown("#### Results by model")
+        summary = (
+            results_df[results_df["reference"] != "NOT_IN_CORPUS"]
+            .groupby("model")
+            .agg(
+                ROUGE_L   =("rouge_l",      "mean"),
+                BERTScore =("bertscore",    "mean"),
+            )
+            .round(4)
+            .reset_index()
+        )
+
+        # Faithfulness: % of rows flagged as faithful (=1) — adversarial included
+        for model_name in results_df["model"].unique():
+            subset = results_df[results_df["model"] == model_name]
+            flagged = (subset["faithfulness"] == 1).sum()
+            auto_reviewable = (subset["faithfulness"] != -1).sum()
+            pct = flagged / len(subset) * 100 if len(subset) else 0
+            summary.loc[summary["model"] == model_name, "Faithfulness (auto %)"] = round(pct, 1)
+
+        st.dataframe(summary, use_container_width=True, hide_index=True)
+
+        # ── Per-question breakdown ─────────────────────────────────────────────
+        st.markdown("#### Per-question breakdown")
+        display_cols = ["question", "type", "model", "rouge_l", "bertscore",
+                        "faithfulness", "prediction"]
+        st.dataframe(
+            results_df[display_cols].sort_values(["question", "model"]),
+            use_container_width=True, hide_index=True
+        )
+
+        # ── Adversarial analysis ───────────────────────────────────────────────
+        st.markdown("#### Adversarial question handling")
+        adv = results_df[results_df["type"] == "adversarial"][
+            ["question", "model", "prediction", "faithfulness"]
+        ]
+        st.dataframe(adv, use_container_width=True, hide_index=True)
+
+        # ── Visual comparison ──────────────────────────────────────────────────
+        fig_eval = px.bar(
+            summary.melt(id_vars="model", value_vars=["ROUGE_L", "BERTScore"]),
+            x="variable", y="value", color="model", barmode="group",
+            color_discrete_map={"Groq (LLaMA3)": "#378ADD", "Gemini": "#1D9E75"},
+            labels={"variable": "Metric", "value": "Score", "model": "LLM"},
+            title="ROUGE-L and BERTScore by Model"
+        )
+        st.plotly_chart(fig_eval, use_container_width=True)
+
+        # Save results for download
+        csv = results_df.to_csv(index=False).encode("utf-8")
+        st.download_button("Download full results CSV", csv,
+                           "rag_evaluation_results.csv", "text/csv")
