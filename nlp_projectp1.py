@@ -6,6 +6,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
 from sklearn.decomposition import LatentDirichletAllocation
+from concurrent.futures import ThreadPoolExecutor
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
@@ -23,18 +24,27 @@ TOPIC_COLORS = [
     "#D4537E", "#639922", "#E24B4A", "#0F6E56", "#533AB7"
 ]
 
-# ── Data Loading ───────────────────────────────────────────────────────────────
+# Data Loading - loading simultanesouly to optimise 
 
 @st.cache_data
 def load_data():
-    posts = pd.read_csv(
-        r"C:\Users\Tanisha Iyer\Downloads\archive (4)\the-reddit-climate-change-dataset-posts.csv",
-        usecols=["created_utc", "title", "score", "subreddit.name"]
-    )
-    comments = pd.read_csv(
-        r"C:\Users\Tanisha Iyer\Downloads\archive (4)\the-reddit-climate-change-dataset-comments.csv",
-        usecols=["created_utc", "body", "sentiment", "score", "subreddit.name"]
-    )
+    def load_posts():
+        return pd.read_csv(
+            r"C:\Users\Tanisha Iyer\Downloads\archive (4)\the-reddit-climate-change-dataset-posts.csv",
+            usecols=["created_utc", "title", "score", "subreddit.name"]
+        )
+    def load_comments():
+        return pd.read_csv(
+            r"C:\Users\Tanisha Iyer\Downloads\archive (4)\the-reddit-climate-change-dataset-comments.csv",
+            usecols=["created_utc", "body", "sentiment", "score", "subreddit.name"]
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        f_posts    = executor.submit(load_posts)
+        f_comments = executor.submit(load_comments)
+        posts    = f_posts.result()
+        comments = f_comments.result()
+
     return posts, comments
 
 
@@ -114,12 +124,12 @@ with col_day:
     st.subheader("Activity by Day of Week")
     st.bar_chart(day_activity)
 
-# ── Subreddit Breakdown ────────────────────────────────────────────────────────
+# ── Subreddit Breakdown 
 
 st.subheader("Top 15 Subreddits by Post Count")
 st.bar_chart(posts["subreddit"].value_counts().head(15))
 
-# ── Sentiment Distribution ─────────────────────────────────────────────────────
+# ── Sentiment Distribution 
 
 if "sentiment" in comments.columns:
     st.subheader("Sentiment Distribution")
@@ -142,7 +152,7 @@ if "sentiment" in comments.columns:
     fig_sent.update_layout(showlegend=False)
     st.plotly_chart(fig_sent, use_container_width=True)
 
-# ── Comment Length & Score ─────────────────────────────────────────────────────
+# ── Comment Length & Score 
 
 with st.expander("Comment Length Distribution"):
     st.bar_chart(comments["word_count"].value_counts().head(50))
@@ -153,7 +163,7 @@ with st.expander("Post Score Distribution"):
         return posts[posts["score"] > 0]["score"].clip(upper=500).value_counts().sort_index()
     st.bar_chart(score_dist(posts))
 
-# ── Text Cleaning ──────────────────────────────────────────────────────────────
+# ── Text Cleaning 
 
 def clean_text(text):
     text = str(text).lower()
@@ -240,17 +250,13 @@ def detect_trending(posts_df, _doc_topic, _sampled_idx, dominant, topics):
 # ── Stance Detection ───────────────────────────────────────────────────────────
 
 @st.cache_data
+@st.cache_data
 def assign_stances(comments_df, topics):
-    """
-    For each comment:
-      1. Find its most relevant topic via keyword overlap with comment body.
-      2. Classify stance as Support (sentiment >= 0.05) or Oppose (sentiment < 0.05).
-    Returns comments_df with added columns: topic_id, topic_label, stance.
-    """
-    df = comments_df.copy().reset_index()
+    # Sample for speed — 100k is plenty for representative stance analysis
+    df = comments_df.sample(min(100_000, len(comments_df)), random_state=42)
+    df = df.copy().reset_index()
     df["body_clean"] = df["body"].apply(clean_text)
 
-    # Build keyword sets per topic
     keyword_sets = {t["id"]: set(t["keywords"]) for t in topics}
     topic_labels = {t["id"]: t["label"] for t in topics}
 
