@@ -1,8 +1,5 @@
-import pandas as pd 
-import numpy as np 
-import plotly.express as px
-import streamlit as st 
-
+import pandas as pd
+import streamlit as st
 
 """ Load Data """
 
@@ -14,37 +11,57 @@ def load_data():
 
 posts, comments = load_data()
 
-""" Preprocessing Data """
+""" Preprocessing """
 
 # Convert timestamps
 posts['created_utc'] = pd.to_datetime(posts['created_utc'], unit='s')
 comments['created_utc'] = pd.to_datetime(comments['created_utc'], unit='s')
 
-# Comment length (word count)
-comments['word_count'] = comments['body'].astype(str).apply(lambda x: len(x.split()))
-
-st.title("Reddit Analytics Dashboard")
-
-col1, col2, col3, col4 = st.columns(4)
-
-num_posts = len(posts)
-num_comments = len(comments)
-
-# Only if author exists
-num_users = comments['author'].nunique() if 'author' in comments.columns else "Not Available"
-
-avg_comment_length = comments['word_count'].mean()
-
-col1.metric("Posts", num_posts)
-col2.metric("Comments", num_comments)
-col3.metric("Users", num_users)
-col4.metric("Avg Comment Length", f"{avg_comment_length:.2f} words")
-
-"""Comments or Posts According to Time """
+# Comment length
+comments['word_count'] = comments['body'].astype(str).str.split().str.len()
 
 # Set index
 posts.set_index('created_utc', inplace=True)
 comments.set_index('created_utc', inplace=True)
+
+""" Sidebar """
+
+st.sidebar.title("Filters")
+time_range = st.sidebar.selectbox(
+    "Select Time Range",
+    ["Daily", "Weekly", "Monthly"]
+)
+
+""" KPI Metrics """
+
+st.title("Reddit Analytics Dashboard")
+
+num_posts = len(posts)
+num_comments = len(comments)
+avg_comment_length = comments['word_count'].mean()
+
+# ✅ Sentiment Metric
+if 'sentiment' in comments.columns:
+    avg_sentiment = comments['sentiment'].mean()
+else:
+    avg_sentiment = None
+
+col1, col2, col3, col4 = st.columns(4)
+
+col1.metric("Posts", f"{num_posts:,}")
+col2.metric("Comments", f"{num_comments:,}")
+col3.metric("Avg Comment Length", f"{avg_comment_length:.2f} words")
+
+if avg_sentiment is not None:
+    col4.metric(
+        "Avg Sentiment",
+        f"{avg_sentiment:.3f}",
+        help="-1 = negative, +1 = positive"
+    )
+else:
+    col4.metric("Avg Sentiment", "Not Available")
+
+""" Time-Based Analysis """
 
 # Resampling
 posts_daily = posts.resample('D').size()
@@ -53,30 +70,19 @@ comments_daily = comments.resample('D').size()
 posts_weekly = posts.resample('W').size()
 comments_weekly = comments.resample('W').size()
 
-posts_monthly = posts.resample('M').size()
-comments_monthly = comments.resample('M').size()
+posts_monthly = posts.resample('ME').size()
+comments_monthly = comments.resample('ME').size()
 
-#Dropdown 
-
-time_range = st.selectbox(
-    "Select According to Daily/Weekly/Monthly",
-    ["Daily", "Weekly", "Monthly"]
-)
-
-
+# Dynamic selection
 if time_range == "Daily":
     posts_data = posts_daily
     comments_data = comments_daily
-
 elif time_range == "Weekly":
     posts_data = posts_weekly
     comments_data = comments_weekly
-
-else:  
+else:
     posts_data = posts_monthly
     comments_data = comments_monthly
-
-# plot 
 
 st.subheader(f"{time_range} Activity")
 
@@ -85,27 +91,17 @@ st.line_chart(pd.DataFrame({
     "Comments": comments_data
 }))
 
-""" Streamlit Plotting """
-
-st.subheader("Daily Activity")
-st.line_chart(pd.DataFrame({
-    "Posts": posts_daily,
-    "Comments": comments_daily
-}))
-
-""" Peak Activity Time """
+""" Peak Activity """
 
 comments['hour'] = comments.index.hour
-
 hourly_activity = comments.groupby('hour').size()
 
 st.subheader("Peak Activity by Hour")
 st.bar_chart(hourly_activity)
 
-"""Peak Activity Day of the Week """
+""" Day of Week """
 
 comments['day'] = comments.index.day_name()
-
 day_activity = comments.groupby('day').size()
 
 st.subheader("Activity by Day of Week")
@@ -113,23 +109,22 @@ st.bar_chart(day_activity)
 
 """ Comment Length Distribution """
 
-st.subheader("Distribution of Comment Length")
-st.histogram = st.bar_chart(comments['word_count'].value_counts().head(50))
+st.subheader("Comment Length Distribution")
+st.bar_chart(comments['word_count'].value_counts().head(50))
 
-""" Comments per Post """
+""" Engagement: Comments per Post """
 
-comments_per_post = comments.groupby('link_id').size()
+if 'link_id' in comments.columns:
+    comments_per_thread = comments.groupby('link_id').size()
 
-st.subheader("Comments per Post (Avg)")
-st.write(comments_per_post.mean())
+    st.subheader("Comments per Post (Average)")
+    st.write(f"{comments_per_thread.mean():.2f}")
 
-st.sidebar.title("Filters")
-time_range = st.sidebar.selectbox("Select Range", ["Daily", "Weekly", "Monthly"])
+    st.subheader("Comments per Post Distribution")
+    st.bar_chart(comments_per_thread.value_counts().head(50))
 
-""" Statistics """ 
-unique_users = df1["id"].nunique()
-posts = df1["type"].count()
-comments = df2["type"].count()
-
-
-
+    st.subheader("Top 10 Most Active Threads")
+    top_threads = comments_per_thread.sort_values(ascending=False).head(10)
+    st.bar_chart(top_threads)
+else:
+    st.warning("link_id not found: cannot compute comments per post")
