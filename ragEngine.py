@@ -1,5 +1,5 @@
 """
-RAG engine: retrieval from FAISS + generation via Groq and Gemini.
+RAG engine: retrieval from FAISS + generation via Groq and Together AI.
 """
 
 import faiss
@@ -7,7 +7,7 @@ import pickle
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-# ── Load index once at import time ─────────────────────────────────────────────
+#load index 
 INDEX_PATH = "faiss_index.bin"
 META_PATH  = "faiss_meta.pkl"
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
@@ -27,7 +27,7 @@ def _load():
         _model = SentenceTransformer(MODEL_NAME)
 
 
-# ── Retrieval ──────────────────────────────────────────────────────────────────
+# retrieval 
 
 def retrieve(query: str, top_k: int = 8) -> list[dict]:
     """Embed query and return top_k most similar chunks."""
@@ -69,13 +69,32 @@ Question: {query}
 Answer:"""
 
 
-# ── LLM Clients ───────────────────────────────────────────────────────────────
-# Install: pip install groq google-generativeai
+# LLM 
 
-def call_groq(prompt: str, api_key: str, model: str = "llama3-8b-8192") -> str:
-    """Call Groq API (free tier). Models: llama3-8b-8192, mixtral-8x7b-32768"""
+def call_groq(prompt: str, api_key: str, model: str = "llama-3.1-8b-instant") -> str:
     from groq import Groq
-    client   = Groq(api_key=api_key)
+    client = Groq(api_key=api_key)
+
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=512,
+        temperature=0.2,
+    )
+
+    return response.choices[0].message.content.strip()
+
+
+def call_together(prompt: str, api_key: str,
+                  model: str = "meta-llama/Llama-3-8b-chat-hf") -> str:
+    """Call Together AI API (free tier).
+    Free models include:
+      - meta-llama/Llama-3-8b-chat-hf
+      - mistralai/Mistral-7B-Instruct-v0.1
+      - google/gemma-2b-it
+    """
+    from together import Together
+    client   = Together(api_key=api_key)
     response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
@@ -85,7 +104,7 @@ def call_groq(prompt: str, api_key: str, model: str = "llama3-8b-8192") -> str:
     return response.choices[0].message.content.strip()
 
 
-#  Main RAG function 
+# Main RAG Function 
 
 def rag_answer(query: str, llm: str, api_keys: dict, top_k: int = 8) -> dict:
     chunks  = retrieve(query, top_k=top_k)
@@ -94,7 +113,9 @@ def rag_answer(query: str, llm: str, api_keys: dict, top_k: int = 8) -> dict:
 
     if llm == "Groq (LLaMA3)":
         answer = call_groq(prompt, api_keys["groq"])
+    elif llm == "Together AI (LLaMA3)":
+        answer = call_together(prompt, api_keys["together"])
     else:
-        answer = "No LLM selected."
+        answer = "No valid LLM selected."
 
     return {"answer": answer, "chunks": chunks, "context": context, "prompt": prompt}

@@ -6,7 +6,7 @@ import pandas as pd
 from rouge_score import rouge_scorer
 from bert_score import score as bert_score_fn
 
-# ── Ground truth Q&A set ───────────────────────────────────────────────────────
+# Ground truth questions and answers 
 
 GROUND_TRUTH = [
     # Factual
@@ -35,7 +35,7 @@ GROUND_TRUTH = [
         "answer":   "Common topics include global warming, policy, fossil fuels, renewable energy, and extreme weather.",
         "type":     "factual"
     },
-    # Opinion
+    # Opinion type of questions 
     {
         "question": "What do Reddit users think about government climate policy?",
         "answer":   "Users are generally critical of government inaction and call for stronger emissions regulations and international agreements.",
@@ -141,7 +141,7 @@ def evaluate(results_df: pd.DataFrame) -> pd.DataFrame:
 
     results_df["bertscore"] = results_df.index.map(lambda i: bert_scores.get(i, None))
 
-    # Faithfulness
+    # computing faithfulness 
     results_df["faithfulness"] = results_df.apply(
         lambda r: faithfulness_flag(r["prediction"], r["context"]), axis=1
     )
