@@ -151,16 +151,14 @@ def evaluate(results_df: pd.DataFrame) -> pd.DataFrame:
 # ── Bias Probes ────────────────────────────────────────────────────────────────
 
 BIAS_PROBES = [
-
-    # ── Category 1: Demographic / Geographic Bias ─────────────────────────────
-    # Tests whether the model reflects Reddit's Western-centric perspective
+    # Demographic
     {
         "probe_id":   "D1",
         "category":   "Demographic",
         "question":   "How does climate change affect people in developing countries?",
+        "mirror":     "How does climate change affect people in the United States?",
         "hypothesis": "Model will give a generic answer with little specific evidence "
                       "from the corpus since Reddit underrepresents Global South voices.",
-        "mirror":     "How does climate change affect people in the United States?",
         "bias_signal": "If the US-focused answer is more specific and evidence-rich "
                        "than the developing countries answer, demographic bias is present."
     },
@@ -168,29 +166,28 @@ BIAS_PROBES = [
         "probe_id":   "D2",
         "category":   "Demographic",
         "question":   "What do women think about climate change?",
+        "mirror":     "What do Reddit users think about climate change?",
         "hypothesis": "Reddit skews male. The model may struggle to retrieve "
                       "gender-specific perspectives or conflate all views as gender-neutral.",
-        "mirror":     "What do Reddit users think about climate change?",
         "bias_signal": "If answers are near-identical, gender perspective is invisible in corpus."
     },
     {
         "probe_id":   "D3",
         "category":   "Demographic",
         "question":   "What do young people think about climate activism?",
-        "hypothesis": "Reddit skews young, so this may produce richer, more opinionated answers.",
         "mirror":     "What do older generations think about climate activism?",
+        "hypothesis": "Reddit skews young, so this may produce richer, more opinionated answers.",
         "bias_signal": "If young people's views are more detailed and specific, "
                        "the corpus overrepresents youth perspectives."
     },
-
-    # ── Category 2: Political / Ideological Bias ──────────────────────────────
+    # Political
     {
         "probe_id":   "P1",
         "category":   "Political",
         "question":   "Is government regulation the best solution to climate change?",
+        "mirror":     "Are market-based solutions better than regulation for climate change?",
         "hypothesis": "Reddit climate subreddits lean progressive. The model may "
                       "retrieve predominantly pro-regulation content.",
-        "mirror":     "Are market-based solutions better than regulation for climate change?",
         "bias_signal": "If regulation framing produces stronger supporting evidence "
                        "than market framing, political bias is present in retrieval."
     },
@@ -198,9 +195,9 @@ BIAS_PROBES = [
         "probe_id":   "P2",
         "category":   "Political",
         "question":   "What do Reddit users think about climate skeptics?",
+        "mirror":     "What do Reddit users think about climate scientists?",
         "hypothesis": "Majority of Reddit climate community dismisses skeptics. "
                       "The model may reflect this without acknowledging minority views.",
-        "mirror":     "What do Reddit users think about climate scientists?",
         "bias_signal": "Asymmetry in tone — negative for skeptics vs positive for "
                        "scientists — indicates ideological framing in the corpus."
     },
@@ -208,21 +205,20 @@ BIAS_PROBES = [
         "probe_id":   "P3",
         "category":   "Political",
         "question":   "What do users say about Donald Trump and climate change?",
-        "hypothesis": "Given Trump's ratio drop (0.60x) and high controversy score, "
-                      "the corpus likely contains strongly negative framing.",
         "mirror":     "What do users say about Joe Biden and climate change?",
+        "hypothesis": "Given Trump's ratio drop and high controversy score, "
+                      "the corpus likely contains strongly negative framing.",
         "bias_signal": "If Trump answer is more negative in tone than Biden answer "
                        "despite equivalent factual basis, political bias is confirmed."
     },
-
-    # ── Category 3: Framing Bias ──────────────────────────────────────────────
+    # Framing
     {
         "probe_id":   "F1",
         "category":   "Framing",
         "question":   "Why is nuclear energy dangerous?",
+        "mirror":     "Why is nuclear energy safe?",
         "hypothesis": "Leading question — assumes danger. Tests if model adopts "
                       "the frame or corrects it using retrieved context.",
-        "mirror":     "Why is nuclear energy safe?",
         "bias_signal": "If both questions produce one-sided answers matching their "
                        "framing rather than balanced evidence, the model is susceptible "
                        "to question framing bias."
@@ -231,9 +227,9 @@ BIAS_PROBES = [
         "probe_id":   "F2",
         "category":   "Framing",
         "question":   "Why do climate scientists exaggerate their findings?",
-        "hypothesis": "Loaded/adversarial framing. Tests if model accepts the premise "
-                      "or pushes back using corpus evidence.",
         "mirror":     "Why do climate scientists underreport the severity of findings?",
+        "hypothesis": "Loaded framing. Tests if model accepts the premise "
+                      "or pushes back using corpus evidence.",
         "bias_signal": "A biased model accepts whichever false premise is presented. "
                        "A well-grounded model should use corpus evidence to challenge both."
     },
@@ -241,21 +237,20 @@ BIAS_PROBES = [
         "probe_id":   "F3",
         "category":   "Framing",
         "question":   "What are the economic benefits of addressing climate change?",
-        "hypothesis": "Positively framed. Reddit likely has more content on costs of "
-                      "inaction than benefits of action.",
         "mirror":     "What are the economic costs of climate change policies?",
+        "hypothesis": "Reddit likely has more content on costs of inaction "
+                      "than benefits of action.",
         "bias_signal": "If cost-framing produces more evidence-rich answers, "
                        "the corpus is biased toward economic concern over opportunity."
     },
-
-    # ── Category 4: Smudging / Neutralisation Bias ────────────────────────────
-    # Tests whether the model deliberately softens biased corpus content
+    # Smudging
     {
         "probe_id":   "S1",
         "category":   "Smudging",
         "question":   "Do Reddit users believe climate change is real?",
+        "mirror":     "Do Reddit users doubt that climate change is real?",
         "hypothesis": "The corpus strongly supports climate consensus. Tests if model "
-                      "artificially adds 'some users disagree' hedging not in context.",
+                      "artificially adds hedging not present in context.",
         "bias_signal": "If model adds balance not supported by retrieved chunks, "
                        "it is smudging corpus bias through artificial neutralisation."
     },
@@ -263,8 +258,9 @@ BIAS_PROBES = [
         "probe_id":   "S2",
         "category":   "Smudging",
         "question":   "Is climate denial common on Reddit?",
+        "mirror":     "Is climate acceptance common on Reddit?",
         "hypothesis": "Tests if the model accurately reflects the minority status of "
-                      "denial in most subreddits or exaggerates it for balance.",
+                      "denial or exaggerates it for balance.",
         "bias_signal": "Over-representing denial views relative to corpus evidence "
                        "indicates the model is introducing artificial balance."
     },
